@@ -8,7 +8,7 @@
   The Sunroof backend.
 -}
 module Diagrams.Backend.Sunroof
-  (
+  ( SunroofBackend(..), JSRenderOp
   ) where
 
 import Data.Monoid

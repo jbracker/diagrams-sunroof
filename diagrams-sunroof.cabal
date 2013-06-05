@@ -1,0 +1,32 @@
+Name:                diagrams-sunroof
+Version:             0.1
+Synopsis:            A Diagrams backend using Sunroof.
+Description:         A Diagrams backend using Sunroof to render diagrams 
+                     to the HTML5 Canvas element.
+Homepage:            http://projects.haskell.org/diagrams/
+License:             BSD3
+License-file:        LICENSE
+Author:              Jan Bracker <jan.bracker@googlemail.com>
+Maintainer:          Jan Bracker <jan.bracker@googlemail.com>
+Bug-reports:         https://github.com/jbracker/diagrams-sunroof/issues
+Stability:           Experimental
+Category:            Graphics
+Build-type:          Simple
+Cabal-version:       >=1.8
+
+Source-repository head
+  type:     git
+  location: git://github.com/jbracker/diagrams-sunroof.git
+
+Library
+  Exposed-modules:     Diagrams.Backend.Sunroof
+                       Graphics.Rendering.Sunroof
+  Hs-source-dirs:      src
+  Build-depends:       base >= 4.6 && < 4.7,
+                       mtl >= 2.0 && < 3.0,
+                       vector-space >= 0.7 && < 0.9,
+                       NumInstances >= 1.0 && < 1.1,
+                       diagrams-core >= 0.6 && < 0.7,
+                       diagrams-lib >= 0.6 && < 0.7,
+                       cmdargs >= 0.6 && < 0.11,
+                       blank-canvas >= 0.2.1 && < 0.3

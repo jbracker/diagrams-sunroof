@@ -20,6 +20,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 
 import Diagrams.Prelude hiding ( (#) )
+import Diagrams.TwoD.Text ( Text(..) )
 
 import Language.Sunroof (JS((:=)), T, JSNumber, (#), js)
 import Language.Sunroof.JS.Canvas (JSCanvas)
@@ -133,6 +134,11 @@ instance Renderable (Path R2) (SunroofBackend t) where
             renderTrail (p, tr) = do
               moveTo' $ unp2 p
               unRender $ render SunroofBackend tr
+
+instance Renderable Text (SunroofBackend t) where
+  render :: SunroofBackend t -> Text -> Render (SunroofBackend t) (V Text)
+  render b (Text trans align text) = withStyle b mempty trans $ SRender $ do
+      r $ SR.fillText (js text) (0, 0) -- TODO
 
 -- -----------------------------------------------------------------------
 -- Utility Functions

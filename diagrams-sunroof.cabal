@@ -20,13 +20,11 @@ Source-repository head
 
 Library
   Exposed-modules:     Diagrams.Backend.Sunroof
-                       Graphics.Rendering.Sunroof
   Hs-source-dirs:      src
-  Build-depends:       base >= 4.6 && < 4.7,
-                       mtl >= 2.0 && < 3.0,
-                       vector-space >= 0.7 && < 0.9,
-                       NumInstances >= 1.0 && < 1.1,
+  Build-depends:       base >= 4.3.1 && < 5,
+                       mtl >= 2.0,
+                       sunroof-compiler == 0.2.*,
+                       data-default == 0.5.*,
+                       NumInstances >= 1.1,
                        diagrams-core >= 0.6 && < 0.7,
-                       diagrams-lib >= 0.6 && < 0.7,
-                       cmdargs >= 0.6 && < 0.11,
-                       blank-canvas >= 0.2.1 && < 0.3
+                       diagrams-lib >= 0.6 && < 0.7

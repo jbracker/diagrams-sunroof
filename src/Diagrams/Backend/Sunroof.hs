@@ -8,7 +8,7 @@
   The Sunroof backend.
 -}
 module Diagrams.Backend.Sunroof
-  ( SunroofBackend(..), JSRenderOp
+  ( SunroofBackend(..), JSRenderOp, Options(..)
   ) where
 
 import Data.Monoid
@@ -19,10 +19,12 @@ import Control.Monad ( when )
 import Control.Monad.Reader
 import Control.Monad.State
 
-import Diagrams.Prelude hiding ( (#) )
+import Diagrams.Prelude as DP
 import Diagrams.TwoD.Text ( Text(..) )
+import Diagrams.TwoD.Adjust ( adjustDia2D )
 
 import Language.Sunroof (JS((:=)), T, JSNumber, (#), js)
+import Language.Sunroof as SR
 import Language.Sunroof.JS.Canvas (JSCanvas)
 import qualified Language.Sunroof.JS.Canvas as SR
 
@@ -49,7 +51,7 @@ context :: CanvasM t JSCanvas
 context = lift ask
 
 r :: (JSRenderOp t) -> CanvasM t ()
-r render = context >>= \c -> lift (lift $ c # render)
+r render = context >>= \c -> lift (lift $ c SR.# render)
 
 pos :: CanvasM t (Double, Double)
 pos = currentPos `fmap` get
@@ -90,27 +92,38 @@ bezierCurveTo' c1 c2 p' = do
 instance Backend (SunroofBackend t) R2 where
   data Render  (SunroofBackend t) R2 = SRender (CanvasM t ())
   type Result  (SunroofBackend t) R2 = JSRenderOp t
-  data Options (SunroofBackend t) R2 = NoOptions
+  data Options (SunroofBackend t) R2 = SunroofOptions 
+    { canvasSize :: SizeSpec2D
+    }
   
   withStyle :: SunroofBackend t -> Style R2 -> Transformation R2
             -> Render (SunroofBackend t) R2 -> Render (SunroofBackend t) R2
   withStyle _ style trans (SRender render) = SRender $ do
     r $ SR.save -- Open local environment
-    -- Apply styles
-    setCanvasStyle style
-    r $ setCanvasTrans trans
     render -- Render using the given styles
+    r $ setCanvasTrans trans -- Transform
+    setCanvasStyle style -- Style
+    r $ SR.stroke
+    r $ SR.fill
     r $ SR.restore -- Close local environment
 
   -- | 'doRender' is used to interpret rendering operations.
-  doRender :: SunroofBackend t          -- ^ Backend token (needed only for type inference)
-           -> Options (SunroofBackend t) R2  -- ^ Backend-specific collection of rendering options
-           -> Render (SunroofBackend t) R2   -- ^ Rendering operation to perform
-           -> Result (SunroofBackend t) R2   -- ^ Output of the rendering operation
+  doRender :: SunroofBackend t
+           -> Options (SunroofBackend t) R2
+           -> Render (SunroofBackend t) R2
+           -> Result (SunroofBackend t) R2
   doRender _ _ render = \c -> 
     let sm = unRender render
         rm = evalStateT sm def
     in runReaderT rm c
+  
+  adjustDia :: Monoid' m 
+            => SunroofBackend t -> Options (SunroofBackend t) R2 
+            -> QDiagram (SunroofBackend t) R2 m 
+            -> (Options (SunroofBackend t) R2, QDiagram (SunroofBackend t) R2 m)
+  adjustDia c opts d = adjustDia2D canvasSize setCanvasSize c opts
+                       (d DP.# reflectY DP.# fcA transparent DP.# lw 0.01)
+    where setCanvasSize sz o = o { canvasSize = sz }
 
 instance Monoid (Render (SunroofBackend t) R2) where
   mempty  = SRender $ return ()
@@ -148,9 +161,9 @@ unRender :: (Backend b v, b ~ SunroofBackend t, v ~ R2) => Render b v -> CanvasM
 unRender (SRender r) = r
 
 setCanvasTrans :: Transformation R2 -> JSRenderOp t
-setCanvasTrans t c = c # SR.transform (js a1) (js a2) (js b1) (js b2) (js c1) (js c2)
-  where (a1,a2) = unr2 $ apply t unitX
-        (b1,b2) = unr2 $ apply t unitY
+setCanvasTrans t c = c SR.# SR.transform (js a1) (js a2) (js b1) (js b2) (js c1) (js c2)
+  where (a1,a2) = unr2 $ DP.apply t unitX
+        (b1,b2) = unr2 $ DP.apply t unitY
         (c1,c2) = unr2 $ transl t
 
 setCanvasStyle :: forall v t. Style v -> CanvasM t ()
@@ -169,7 +182,7 @@ strokeColor' :: (Color c) => c -> CanvasM t ()
 strokeColor' c = r $ SR.strokeStyle := (js $ showColorJS c)
 
 fillColor' :: (Color c) => c -> CanvasM t ()
-fillColor' c = r $ SR.setFillStyle $ js $ showColorJS c
+fillColor' c = r $ SR.fillStyle := js (showColorJS c)
 
 lineWidth' :: Double -> CanvasM t ()
 lineWidth' w = r $ SR.lineWidth := js w

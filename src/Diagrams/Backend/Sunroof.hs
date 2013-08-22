@@ -22,7 +22,7 @@ import Control.Monad.State
 
 import Diagrams.Prelude as DP
 import Diagrams.TwoD.Text ( Text(..) )
-import Diagrams.TwoD.Adjust ( adjustDia2D )
+import Diagrams.TwoD.Adjust ( adjustDia2D, setDefault2DAttributes )
 import Diagrams.TwoD.Path ( FillRuleA, getFillRule )
 
 import Language.Sunroof (JS((:=)), T, JSNumber, (#), js)
@@ -42,7 +42,7 @@ data CanvasState = CS
   }
 
 instance Default CanvasState where
-  def = CS { currentPos = (0,0), canvasFillRule = DP.EvenOdd }
+  def = CS { currentPos = (0,0), canvasFillRule = DP.Winding }
 
 -- -----------------------------------------------------------------------
 -- Backend Render Monad
@@ -93,9 +93,7 @@ bezierCurveTo' c1 c2 p' = do
 fill' :: CanvasM t ()
 fill' = do
   fr <- canvasFillRule `fmap` get
-  r $ SR.invoke "fill" $ case fr of
-                           DP.Winding -> SR.string "nonzero"
-                           DP.EvenOdd -> SR.string "evenodd"
+  r $ SR.invoke "fill" $ showFillRuleJS fr
 
 -- -----------------------------------------------------------------------
 -- Backend Instances
@@ -112,9 +110,9 @@ instance Backend (SunroofBackend t) R2 where
             -> Render (SunroofBackend t) R2 -> Render (SunroofBackend t) R2
   withStyle _ style trans (SRender render) = SRender $ do
     r $ SR.save -- Open local environment
+    setCanvasStyle style -- Style
     render -- Render using the given styles
     r $ setCanvasTrans trans -- Transform
-    setCanvasStyle style -- Style
     r $ SR.stroke
     fill'
     r $ SR.restore -- Close local environment
@@ -134,7 +132,7 @@ instance Backend (SunroofBackend t) R2 where
             -> QDiagram (SunroofBackend t) R2 m 
             -> (Options (SunroofBackend t) R2, QDiagram (SunroofBackend t) R2 m)
   adjustDia c opts d = adjustDia2D canvasSize setCanvasSize c opts
-                       (d DP.# reflectY DP.# fcA transparent DP.# lw 0.01)
+                       (d DP.# reflectY DP.# defaultStyle) --fcA transparent DP.# lw 0.01)
     where setCanvasSize sz o = o { canvasSize = sz }
 
 instance Monoid (Render (SunroofBackend t) R2) where
@@ -193,6 +191,10 @@ instance Renderable Text (SunroofBackend t) where
 unRender :: (Backend b v, b ~ SunroofBackend t, v ~ R2) => Render b v -> CanvasM t ()
 unRender (SRender r) = r
 
+defaultStyle :: Semigroup m => QDiagram b R2 m -> QDiagram b R2 m
+defaultStyle d = d DP.# DP.fcA DP.transparent
+                   DP.# setDefault2DAttributes
+
 setCanvasTrans :: Transformation R2 -> JSRenderOp t
 setCanvasTrans t c = c SR.# SR.transform (js a1) (js a2) (js b1) (js b2) (js c1) (js c2)
   where (a1,a2) = unr2 $ DP.apply t unitX
@@ -239,6 +241,10 @@ showColorJS c =
   let s = show . floor . (* 255)
       (r,g,b,a) = colorToSRGBA c
   in concat [ "rgba(", s r, ",", s g, ",", s b, ",", show a, ")" ]
+
+showFillRuleJS :: FillRule -> JSString
+showFillRuleJS DP.Winding = SR.string "nonzero"
+showFillRuleJS DP.EvenOdd = SR.string "evenodd"
 
 fromLineCap :: LineCap -> String
 fromLineCap lc = case lc of

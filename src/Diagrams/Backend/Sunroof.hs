@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GADTs #-}
 {-|
   The Sunroof backend.
 -}
@@ -13,7 +14,7 @@ module Diagrams.Backend.Sunroof
 
 import Data.Monoid
 import Data.Maybe
-import Data.Default
+import Data.Default.Class
 
 import Control.Monad ( when )
 import Control.Monad.Reader
@@ -22,6 +23,7 @@ import Control.Monad.State
 import Diagrams.Prelude as DP
 import Diagrams.TwoD.Text ( Text(..) )
 import Diagrams.TwoD.Adjust ( adjustDia2D )
+import Diagrams.TwoD.Path ( FillRuleA, getFillRule )
 
 import Language.Sunroof (JS((:=)), T, JSNumber, (#), js)
 import Language.Sunroof as SR
@@ -34,10 +36,13 @@ import qualified Language.Sunroof.JS.Canvas as SR
 
 data SunroofBackend (t :: T) = SunroofBackend
 
-data CanvasState = CS { currentPos :: (Double, Double) }
+data CanvasState = CS 
+  { currentPos :: (Double, Double) 
+  , canvasFillRule :: DP.FillRule
+  }
 
 instance Default CanvasState where
-  def = CS { currentPos = (0,0) }
+  def = CS { currentPos = (0,0), canvasFillRule = DP.EvenOdd }
 
 -- -----------------------------------------------------------------------
 -- Backend Render Monad
@@ -85,6 +90,13 @@ bezierCurveTo' c1 c2 p' = do
   r $ SR.bezierCurveTo (jsP $ p + c1) (jsP $ p + c2) (jsP newP)
   move newP
 
+fill' :: CanvasM t ()
+fill' = do
+  fr <- canvasFillRule `fmap` get
+  r $ SR.invoke "fill" $ case fr of
+                           DP.Winding -> SR.string "nonzero"
+                           DP.EvenOdd -> SR.string "evenodd"
+
 -- -----------------------------------------------------------------------
 -- Backend Instances
 -- -----------------------------------------------------------------------
@@ -104,7 +116,7 @@ instance Backend (SunroofBackend t) R2 where
     r $ setCanvasTrans trans -- Transform
     setCanvasStyle style -- Style
     r $ SR.stroke
-    r $ SR.fill
+    fill'
     r $ SR.restore -- Close local environment
 
   -- | 'doRender' is used to interpret rendering operations.
@@ -129,7 +141,13 @@ instance Monoid (Render (SunroofBackend t) R2) where
   mempty  = SRender $ return ()
   (SRender f1) `mappend` (SRender f2) = SRender $ f1 >> f2
 
-instance Renderable (Segment R2) (SunroofBackend t) where
+instance Renderable (Segment Closed R2) (SunroofBackend t) where
+  render c = render c . (fromSegments :: [Segment Closed R2] -> Path R2) . (:[])
+
+instance Renderable (Trail R2) (SunroofBackend t) where
+  render c = render c . pathFromTrail
+{-
+instance Renderable (Segment Closed R2) (SunroofBackend t) where
   render _ (Linear v) = SRender $ lineTo' (unr2 v)
   render _ (Cubic c1 c2 v) = SRender $ bezierCurveTo' (unr2 c1) (unr2 c2) (unr2 v)
 
@@ -137,16 +155,31 @@ instance Renderable (Trail R2) (SunroofBackend t) where
   render _ (Trail segs c) = SRender $ do
     mapM_ (unRender . render SunroofBackend) segs
     when c $ r $ SR.closePath
-
+-}
 instance Renderable (Path R2) (SunroofBackend t) where
   render :: SunroofBackend t -> Path R2 -> Render (SunroofBackend t) (V (Path R2))
-  render _ (Path trs) = SRender $ do
-    r $ SR.beginPath
-    mapM_ renderTrail trs
-      where renderTrail :: (Point R2, Trail R2) -> CanvasM t ()
-            renderTrail (p, tr) = do
-              moveTo' $ unp2 p
-              unRender $ render SunroofBackend tr
+  render _ p = SRender $ do
+    mapM_ renderLocTrail $ fmap viewLoc $ pathTrails p
+    fill'
+    r $ SR.stroke
+      where 
+        renderLocTrail :: (Point R2, Trail R2) -> CanvasM t ()
+        renderLocTrail (p, tr) = do
+          moveTo' $ unp2 p 
+          withTrail renderLineTrail (renderLoopTrail p) tr
+        renderLineTrail :: Trail' Line R2 -> CanvasM t ()
+        renderLineTrail tr = do
+          mapM_ renderSegment $ lineSegments tr
+        renderLoopTrail :: Point R2 -> Trail' Loop R2 -> CanvasM t ()
+        renderLoopTrail p tr = do
+          let (segs, openSeg) = loopSegments tr
+          mapM_ renderSegment segs
+          renderSegment openSeg
+        renderSegment :: Segment c R2 -> CanvasM t ()
+        renderSegment (Linear (OffsetClosed p)) = lineTo' (unr2 p)
+        renderSegment (Linear OffsetOpen)       = lineTo' (0,0)
+        renderSegment (Cubic p1 p2 (OffsetClosed p3)) = bezierCurveTo' (unr2 p1) (unr2 p2) (unr2 p3)
+        renderSegment (Cubic p1 p2 OffsetOpen)        = bezierCurveTo' (unr2 p1) (unr2 p2) (0,0)
 
 instance Renderable Text (SunroofBackend t) where
   render :: SunroofBackend t -> Text -> Render (SunroofBackend t) (V Text)
@@ -167,16 +200,21 @@ setCanvasTrans t c = c SR.# SR.transform (js a1) (js a2) (js b1) (js b2) (js c1)
         (c1,c2) = unr2 $ transl t
 
 setCanvasStyle :: forall v t. Style v -> CanvasM t ()
-setCanvasStyle s = foldr (>>) (return ()) $ catMaybes $ 
+setCanvasStyle s = do
+  foldr (>>) (return ()) $ catMaybes $ 
     [ handle $ fillColor' . getFillColor
     , handle $ strokeColor' . getLineColor
     , handle $ lineWidth' . getLineWidth
     , handle $ lineJoin' . getLineJoin
     , handle $ lineCap' . getLineCap
     , handle $ globalAlpha' . getOpacity
+    , handle $ fillRule'
     ]
   where handle :: (AttributeClass a) => (a -> CanvasM t ()) -> Maybe (CanvasM t ())
         handle f = f `fmap` getAttr s
+
+fillRule' :: FillRuleA -> CanvasM t ()
+fillRule' fr = modify (\s -> s { canvasFillRule = getFillRule fr })
 
 strokeColor' :: (Color c) => c -> CanvasM t ()
 strokeColor' c = r $ SR.strokeStyle := (js $ showColorJS c)
@@ -199,7 +237,7 @@ globalAlpha' a = r $ SR.globalAlpha := js a
 showColorJS :: (Color c) => c -> String
 showColorJS c = 
   let s = show . floor . (* 255)
-      (r,g,b,a) = colorToRGBA c
+      (r,g,b,a) = colorToSRGBA c
   in concat [ "rgba(", s r, ",", s g, ",", s b, ",", show a, ")" ]
 
 fromLineCap :: LineCap -> String

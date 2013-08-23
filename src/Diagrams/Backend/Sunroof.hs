@@ -113,8 +113,8 @@ instance Backend (SunroofBackend t) R2 where
     setCanvasStyle style -- Style
     render -- Render using the given styles
     r $ setCanvasTrans trans -- Transform
-    r $ SR.stroke
     fill'
+    r $ SR.stroke
     r $ SR.restore -- Close local environment
 
   -- | 'doRender' is used to interpret rendering operations.
@@ -157,10 +157,27 @@ instance Renderable (Trail R2) (SunroofBackend t) where
 instance Renderable (Path R2) (SunroofBackend t) where
   render :: SunroofBackend t -> Path R2 -> Render (SunroofBackend t) (V (Path R2))
   render _ p = SRender $ do
-    mapM_ renderLocTrail $ fmap viewLoc $ pathTrails p
-    fill'
-    r $ SR.stroke
+    --mapM_ renderLocTrail $ fmap viewLoc $ pathTrails p
+    let fixedTrails = map (\(x:xs) -> (x, xs)) $ filter (not . null) $ fixPath p
+    (flip mapM_) (fixPath p) $ \t -> case t of
+      [] -> return ()
+      (x:xs) -> do
+        renderFirstSegment x
+        mapM_ renderSegment xs
+    --fill'
+    --r $ SR.stroke
       where 
+        renderFirstSegment :: FixedSegment R2 -> CanvasM t ()
+        renderFirstSegment s = do
+          case s of
+            (FLinear p1 p2) -> r $ SR.moveTo (jsP $ unp2 p1)
+            (FCubic p1 c1 c2 p2) -> r $ SR.moveTo (jsP $ unp2 p1)
+          renderSegment s
+        
+        renderSegment :: FixedSegment R2 -> CanvasM t ()
+        renderSegment (FLinear p1 p2) = r $ SR.lineTo (jsP $ unp2 p2)
+        renderSegment (FCubic p1 c1 c2 p2) = r $ SR.bezierCurveTo (jsP $ unp2 c1) (jsP $ unp2 c2) (jsP $ unp2 p2)
+        {-
         renderLocTrail :: (Point R2, Trail R2) -> CanvasM t ()
         renderLocTrail (p, tr) = do
           moveTo' $ unp2 p 
@@ -178,7 +195,7 @@ instance Renderable (Path R2) (SunroofBackend t) where
         renderSegment (Linear OffsetOpen)       = lineTo' (0,0)
         renderSegment (Cubic p1 p2 (OffsetClosed p3)) = bezierCurveTo' (unr2 p1) (unr2 p2) (unr2 p3)
         renderSegment (Cubic p1 p2 OffsetOpen)        = bezierCurveTo' (unr2 p1) (unr2 p2) (0,0)
-
+        -}
 instance Renderable Text (SunroofBackend t) where
   render :: SunroofBackend t -> Text -> Render (SunroofBackend t) (V Text)
   render b (Text trans align text) = withStyle b mempty trans $ SRender $ do
